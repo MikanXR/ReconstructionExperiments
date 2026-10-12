@@ -1,0 +1,48 @@
+# Finer fusion for close-range captures (tabletop scale). Run with
+#   run.py <method> --config configs/fine.yaml --tag fine
+# so results land beside the default runs. Depth prediction is identical;
+# only the fusion grid and support tolerance change.
+
+capture_root: captures
+out_root: out
+
+keyframe_stride: 3
+holdout_every: 10
+
+fusion:
+  voxel_size: 0.008
+  sdf_trunc: 0.032
+  depth_min: 0.1
+  depth_max: 5.0
+  bounds_margin: 0.3
+  max_voxels: 60000000
+  gradient_cull: 0.08
+  min_weight: 0.001
+  min_component_triangles: 1500
+
+# Method blocks match configs/default.yaml so fine runs reuse the default runs' depth caches.
+promptda:
+  max_size: 1008
+  conf0_weight: 0.25
+da3:
+  model: depth-anything/DA3-BASE
+  window: 32
+  overlap: 8
+  process_res: 504
+mapanything:
+  model: facebook/map-anything-apache
+  window: 24
+  overlap: 6
+  ignore_depth_inputs: false
+  align_scale_to_lidar: false
+
+eval:
+  near_thresholds: [0.02, 0.05]
+  floater_margin: 0.10
+  support_distance: 0.04
+  support_samples: 200000
+  edge_gradient: 0.08
+  fscore_threshold: 0.05
+  chamfer_samples: 200000
+  render_views: 6
+  topdown_pixels: 800

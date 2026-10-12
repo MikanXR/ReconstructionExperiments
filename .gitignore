@@ -182,3 +182,8 @@ cython_debug/
 
 # source data
 captures/
+# experiment outputs and environments
+out/
+.venv*/
+models/
+third_party/

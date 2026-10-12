@@ -1,0 +1,32 @@
+# MapAnything venv (.venv_mapanything). Install torch from the CUDA index and
+# requirements.txt first, then map-anything and uniception with --no-deps
+# (both would otherwise pull opencv-python-headless over opencv-python),
+# then this file, which lists the imports they actually need:
+#   python -m venv .venv_mapanything
+#   .venv_mapanything\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#   .venv_mapanything\Scripts\python -m pip install -r requirements.txt
+#   git clone --depth 1 https://github.com/facebookresearch/map-anything third_party/map-anything
+#   .venv_mapanything\Scripts\python -m pip install --no-deps -e third_party/map-anything
+#   .venv_mapanything\Scripts\python -m pip install --no-deps uniception==0.1.7
+#   .venv_mapanything\Scripts\python -m pip install -r requirements-mapanything.txt
+# mapanything
+huggingface_hub
+hydra-core
+natsort
+orjson
+pillow-heif
+plyfile
+python-box
+requests
+rerun-sdk~=0.24.1
+safetensors
+tqdm
+trimesh
+# uniception (torchaudio, tensorboard, and opencv-python-headless left out: not imported on the inference path)
+jaxtyping
+einops
+timm
+termcolor
+scikit-learn
+torchmetrics
+minio

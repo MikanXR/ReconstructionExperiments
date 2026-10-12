@@ -1,0 +1,18 @@
+# Depth Anything 3 dependencies for the .venv_da3 venv (see methods/da3.py for the full install order).
+# Install after torch (cu128 index) and requirements.txt, then
+#   pip install -e third_party/Depth-Anything-3 --no-deps
+# --no-deps avoids xformers, which DA3 declares as a hard dependency but only the Giant tier uses,
+# and which would otherwise pull in a CPU torch from PyPI.
+addict
+einops
+evo
+omegaconf
+imageio
+plyfile
+pillow
+safetensors
+moviepy==1.0.3
+pycolmap
+e3nn
+typer
+requests

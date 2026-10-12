@@ -1,0 +1,49 @@
+# Shared settings for every method. Changing these invalidates comparisons
+# between runs, so bump the run name (run.py --tag) rather than editing in place.
+
+capture_root: captures
+out_root: out
+
+# Frame selection. Every keyframe_stride-th capture frame is a keyframe; every
+# holdout_every-th keyframe is held out of fusion and used only for evaluation.
+keyframe_stride: 3
+holdout_every: 10
+
+fusion:
+  voxel_size: 0.015        # metres
+  sdf_trunc: 0.06          # metres, about 4 voxels
+  depth_min: 0.1
+  depth_max: 5.0
+  bounds_margin: 0.3       # metres added around the training LiDAR cloud
+  max_voxels: 60000000     # voxel_size grows until the grid fits
+  gradient_cull: 0.08      # relative depth jump to a 4-neighbour that culls a pixel
+  min_weight: 0.001        # per-pixel weight below which a pixel is skipped
+  min_component_triangles: 500
+
+# Per-method options. Each block is optional; the method module's defaults
+# apply when a key is absent. Override single keys with run.py --opt.
+promptda:
+  max_size: 1008                  # long side fed to the model, floored to a multiple of 14
+  conf0_weight: 0.25              # fusion weight where ARKit confidence is 0 (beyond LiDAR range); 0 drops it
+da3:
+  model: depth-anything/DA3-BASE  # Apache tier; DA3-LARGE-1.1 for the quality number
+  window: 32
+  overlap: 8
+  process_res: 504
+mapanything:
+  model: facebook/map-anything-apache
+  window: 24
+  overlap: 6
+  ignore_depth_inputs: false      # true runs the no-LiDAR ablation
+  align_scale_to_lidar: false     # true divides each window by its median predicted/LiDAR ratio
+
+eval:
+  near_thresholds: [0.02, 0.05]   # metres, "within" percentages
+  floater_margin: 0.10            # metres nearer than LiDAR counts as a floater hit
+  support_distance: 0.05          # metres to nearest training LiDAR point for "supported" surface (the baseline sits within 3 to 5 cm of raw points over noisy regions, so 3 cm measured noise)
+  support_samples: 200000
+  edge_gradient: 0.08             # relative depth jump that marks a silhouette pixel
+  fscore_threshold: 0.05
+  chamfer_samples: 200000
+  render_views: 6
+  topdown_pixels: 800
