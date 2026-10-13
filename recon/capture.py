@@ -1,20 +1,30 @@
-"""Stray Scanner capture loader.
+"""Capture loaders: Stray Scanner directories and MikanARStreamer takes.
 
-A capture directory holds rgb.mp4, depth/NNNNNN.png (uint16 millimetres,
-256x192), confidence/NNNNNN.png (uint8 0/1/2, higher is better), and
-odometry.csv with one row per frame: timestamp, frame, x y z, qx qy qz qw,
+A Stray Scanner capture directory holds rgb.mp4, depth/NNNNNN.png (uint16
+millimetres, 256x192), confidence/NNNNNN.png (uint8 0/1/2, higher is better),
+and odometry.csv with one row per frame: timestamp, frame, x y z, qx qy qz qw,
 fx fy cx cy (colour-frame intrinsics), distortion centre.
 
-Pose convention: odometry rows are camera-to-world. Stray Scanner already
-rotates ARKit's camera frame by 180 degrees about X, so the camera axes are
-OpenCV style (+X right, +Y down, +Z forward) and no further flip is needed.
-World is ARKit's gravity-aligned right-handed frame (+Y up).
+A MikanARStreamer take is <take>.mp4 beside <take>.pose.json (the pose track,
+one record per movie frame with the camera-to-world transform and the colour
+intrinsics), <take>.depth.bin (uint16 millimetre records, one per frame) and
+<take>.conf.bin (uint8 confidence records, one per frame). Record index equals
+pose index equals decoded frame index. The pose track's depth_width,
+depth_height and depth_unit_mm declare the record layout.
+
+Pose convention: both loaders produce camera-to-world with OpenCV camera axes
+(+X right, +Y down, +Z forward) in ARKit's gravity-aligned right-handed world
+(+Y up). Stray Scanner already rotates ARKit's camera frame by 180 degrees
+about X, so its rows are used as they are. A Mikan pose track stores the raw
+ARKit camera transform (+Y up, +Z toward the viewer), so that loader applies
+the same 180 degree rotation about X once, and nothing else.
 """
 
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
@@ -25,6 +35,11 @@ from scipy.spatial.transform import Rotation
 DEPTH_WIDTH = 256
 DEPTH_HEIGHT = 192
 
+# ARKit camera axes (+Y up, +Z toward the viewer) to OpenCV camera axes (+Y
+# down, +Z forward): a 180 degree rotation about X, applied on the camera side
+# of a camera-to-world transform.
+ARKIT_TO_OPENCV_CAMERA = np.diag([1.0, -1.0, -1.0, 1.0])
+
 
 @dataclass
 class Capture:
@@ -33,11 +48,24 @@ class Capture:
     timestamps: np.ndarray         # (N,)
     T_WC: np.ndarray               # (N,4,4) camera-to-world, OpenCV camera axes
     K_color: np.ndarray            # (N,3,3) intrinsics of the colour frame
-    color_size: tuple[int, int]    # (width, height) of rgb.mp4
+    color_size: tuple[int, int]    # (width, height) of the video
+    # Where the frames come from. Stray Scanner reads depth and confidence from
+    # per-frame PNGs under `path`; a Mikan take reads record i of two memory
+    # mapped arrays, so the records are held here and the PNG path is unused.
+    video_path: Path | None = None
+    depth_records: np.ndarray | None = None       # (N,H,W) uint16, Mikan takes only
+    confidence_records: np.ndarray | None = None  # (N,H,W) uint8, Mikan takes only
+    depth_unit_m: float = 0.001                   # metres per depth unit
+    depth_size: tuple[int, int] = (DEPTH_WIDTH, DEPTH_HEIGHT)  # (width, height) of a depth frame
+    label: str | None = None                      # name override; a take is named by its stem
+
+    def __post_init__(self) -> None:
+        if self.video_path is None:
+            self.video_path = self.path / "rgb.mp4"
 
     @property
     def name(self) -> str:
-        return self.path.name
+        return self.label or self.path.name
 
     def __len__(self) -> int:
         return len(self.frame_ids)
@@ -57,12 +85,14 @@ class Capture:
         return self.K_color[self.index_of(frame_id)]
 
     def intrinsics_depth(self, frame_id: int) -> np.ndarray:
-        return scale_intrinsics(self.intrinsics_color(frame_id), self.color_size, (DEPTH_WIDTH, DEPTH_HEIGHT))
+        return scale_intrinsics(self.intrinsics_color(frame_id), self.color_size, self.depth_size)
 
     # ---- per-frame data ----------------------------------------------------
 
     def depth(self, frame_id: int) -> np.ndarray:
         """Depth in metres, float32, 0 where the sensor reported nothing."""
+        if self.depth_records is not None:
+            return np.asarray(self.depth_records[self.index_of(frame_id)]).astype(np.float32) * self.depth_unit_m
         img = cv2.imread(str(self.path / "depth" / f"{frame_id:06d}.png"), cv2.IMREAD_UNCHANGED)
         if img is None or img.dtype != np.uint16:
             raise IOError(f"bad depth image for frame {frame_id}")
@@ -70,6 +100,8 @@ class Capture:
 
     def confidence(self, frame_id: int) -> np.ndarray:
         """ARKit confidence, uint8 0 (low) / 1 (medium) / 2 (high)."""
+        if self.confidence_records is not None:
+            return np.array(self.confidence_records[self.index_of(frame_id)])
         img = cv2.imread(str(self.path / "confidence" / f"{frame_id:06d}.png"), cv2.IMREAD_UNCHANGED)
         if img is None:
             raise IOError(f"missing confidence image for frame {frame_id}")
@@ -87,7 +119,7 @@ class Capture:
         if not wanted:
             return
         last = max(wanted)
-        with av.open(str(self.path / "rgb.mp4")) as container:
+        with av.open(str(self.video_path)) as container:
             stream = container.streams.video[0]
             stream.thread_type = "AUTO"
             for index, frame in enumerate(container.decode(stream)):
@@ -131,7 +163,8 @@ class Capture:
         uv = (K @ pts_c[front].T).T
         u = np.round(uv[:, 0] / uv[:, 2]).astype(int)
         v = np.round(uv[:, 1] / uv[:, 2]).astype(int)
-        inside = (u >= 0) & (u < DEPTH_WIDTH) & (v >= 0) & (v < DEPTH_HEIGHT)
+        width, height = self.depth_size
+        inside = (u >= 0) & (u < width) & (v >= 0) & (v < height)
         other_depth = self.depth(other_id)
         other_conf = self.confidence(other_id)
         u, v, zf = u[inside], v[inside], z[front][inside]
@@ -172,6 +205,71 @@ def load_capture(path: str | Path, frame_count_cache: str | Path | None = None) 
         K_color[i] = [[r["fx"], 0, r["cx"]], [0, r["fy"], r["cy"]], [0, 0, 1]]
 
     return Capture(path, frame_ids, timestamps, T_WC, K_color, _probe_video_size(path / "rgb.mp4"))
+
+
+def load_mikan_take(movie_path: str | Path, frame_count_cache: str | Path | None = None) -> Capture:
+    """Load a MikanARStreamer take from its movie path. The pose track, depth
+    and confidence sidecars are found beside it by stem. The pose track must
+    carry the depth header: a take recorded without LiDAR has nothing to fuse.
+
+    The movie is decoded once to count frames, like the Stray Scanner loader,
+    because a frame the phone wrote but the container reports differently
+    would misalign every record after it; pass frame_count_cache to remember
+    the count."""
+    movie_path = Path(movie_path)
+    stem = movie_path.name[: -len(movie_path.suffix)] if movie_path.suffix else movie_path.name
+    track_path = movie_path.with_name(f"{stem}.pose.json")
+    depth_path = movie_path.with_name(f"{stem}.depth.bin")
+    conf_path = movie_path.with_name(f"{stem}.conf.bin")
+    for required in (movie_path, track_path, depth_path, conf_path):
+        if not required.exists():
+            raise IOError(f"take is missing {required.name}")
+
+    track = json.loads(track_path.read_text())
+    if track.get("format") != "mikan-pose-track" or track.get("version") not in (1, 2):
+        raise IOError(f"{track_path.name} is not a mikan-pose-track version 1 or 2")
+    if "depth_width" not in track or "depth_height" not in track:
+        raise IOError(f"{track_path.name} declares no depth sidecars")
+    depth_width = int(track["depth_width"])
+    depth_height = int(track["depth_height"])
+    depth_unit_m = float(track.get("depth_unit_mm", 1.0)) / 1000.0
+    color_size = (int(track["image_width"]), int(track["image_height"]))
+
+    frames = track["frames"]
+    count = len(frames)
+    record = depth_width * depth_height
+    if depth_path.stat().st_size != count * record * 2:
+        raise IOError(f"{depth_path.name} holds {depth_path.stat().st_size} bytes, expected {count * record * 2}")
+    if conf_path.stat().st_size != count * record:
+        raise IOError(f"{conf_path.name} holds {conf_path.stat().st_size} bytes, expected {count * record}")
+
+    video_frames = _decodable_frame_count(movie_path, frame_count_cache)
+    if video_frames != count:
+        print(f"warning: {movie_path.name} decodes to {video_frames} frames but the pose track has {count}; "
+              f"using the first {min(video_frames, count)}")
+        count = min(video_frames, count)
+
+    depth_records = np.memmap(depth_path, dtype="<u2", mode="r", shape=(len(frames), depth_height, depth_width))
+    confidence_records = np.memmap(conf_path, dtype=np.uint8, mode="r", shape=(len(frames), depth_height, depth_width))
+
+    frame_ids = np.arange(count, dtype=np.int64)
+    timestamps = np.array([f["time_us"] / 1e6 for f in frames[:count]])
+    T_WC = np.zeros((count, 4, 4))
+    K_color = np.zeros((count, 3, 3))
+    for i, f in enumerate(frames[:count]):
+        # Row-major in the file, so a plain reshape is the matrix.
+        T_WC[i] = np.array(f["transform"], dtype=np.float64).reshape(4, 4) @ ARKIT_TO_OPENCV_CAMERA
+        K_color[i] = [[f["fx"], 0, f["cx"]], [0, f["fy"], f["cy"]], [0, 0, 1]]
+
+    return Capture(
+        movie_path.parent, frame_ids, timestamps, T_WC, K_color, color_size,
+        video_path=movie_path,
+        depth_records=depth_records,
+        confidence_records=confidence_records,
+        depth_unit_m=depth_unit_m,
+        depth_size=(depth_width, depth_height),
+        label=stem,
+    )
 
 
 def _read_odometry(csv_path: Path) -> list[dict]:

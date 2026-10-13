@@ -45,6 +45,14 @@ That venv runs the baseline, fusion, evaluation, and the report. Each model gets
 
 Record with [Stray Scanner](https://github.com/strayrobots/scanner) and copy the capture folder into `captures/<id>/` (gitignored). The loader needs `rgb.mp4`, `depth/`, `confidence/`, and an `odometry.csv` with per-frame intrinsics.
 
+A MikanARStreamer take loads the same way: `<take>.mp4` with its `<take>.pose.json`, `<take>.depth.bin` and `<take>.conf.bin` beside it (the format is documented in MikanXR's `docs/reference/videosources.md`). Address it by the movie, absolute or relative to `captures/`:
+
+```
+python run.py lidar_tsdf --capture D:\path\to\take_20261013_120000.mp4
+```
+
+The pose track stores raw ARKit camera transforms, which `recon.capture.load_mikan_take` rotates into the OpenCV camera axes every method expects; the Stray Scanner loader needs no such step because that app bakes the rotation in. `Capture.check_pose_consistency(a, b)` is the check for a new take: with correct poses, LiDAR reprojected between frames thirty apart agrees to a few millimetres median.
+
 ## Running
 
 ```

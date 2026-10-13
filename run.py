@@ -22,7 +22,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-from recon.capture import load_capture  # noqa: E402
+from recon.capture import load_capture, load_mikan_take  # noqa: E402
 from recon.depthcache import DepthCache  # noqa: E402
 from recon import fusion, evaluate, render, report  # noqa: E402
 import methods  # noqa: E402
@@ -32,6 +32,10 @@ STAGES = ["depth", "fuse", "eval", "render", "report"]
 
 def pick_capture(capture_root: Path, capture_id: str | None) -> Path:
     if capture_id:
+        # A Mikan take is addressed by its movie, absolute or under capture_root.
+        if capture_id.lower().endswith(".mp4"):
+            given = Path(capture_id)
+            return given if given.is_absolute() else capture_root / given
         return capture_root / capture_id
     dirs = sorted(p for p in capture_root.iterdir() if (p / "odometry.csv").exists())
     if len(dirs) != 1:
@@ -72,7 +76,11 @@ def main() -> None:
             node = node.setdefault(part, {})
         node[parts[-1]] = yaml.safe_load(value)
     capture_dir = pick_capture(ROOT / cfg["capture_root"], args.capture)
-    capture = load_capture(capture_dir, ROOT / cfg["out_root"] / capture_dir.name / "video_frames.txt")
+    if capture_dir.suffix.lower() == ".mp4":
+        take_name = capture_dir.name[: -len(capture_dir.suffix)]
+        capture = load_mikan_take(capture_dir, ROOT / cfg["out_root"] / take_name / "video_frames.txt")
+    else:
+        capture = load_capture(capture_dir, ROOT / cfg["out_root"] / capture_dir.name / "video_frames.txt")
     train_ids, holdout_ids = capture.split(cfg["keyframe_stride"], cfg["holdout_every"])
     method = methods.load(args.method)
     run_name = method.NAME + (f"_{args.tag}" if args.tag else "")
