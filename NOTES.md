@@ -69,6 +69,10 @@ A hotel room: bed, desk, chair, a corridor, and a bathroom seen through its door
 - DA3 Large now covers the whole room (completeness 100 percent, the sweep approaches everything), but the per-window scale alignment disagrees between windows by several centimetres, which shows as layered seams across the bed and floor in the top-down view: 5.2 cm MAE, 3.5 percent floater hits. The fix would be a global pose-scale solve across windows rather than per-window Umeyama, which is a change inside the model's alignment, not a fusion setting.
 - At room scale the per-method differences are smaller than the baseline's own drift error, so pose refinement (keyframe bundle adjustment or ICP against the fused volume) is now the larger lever for silhouette accuracy than the choice between the two leading depth models.
 
+## First MikanARStreamer take (`take_20261013_125556`)
+
+The first take recorded by the streamer's own LiDAR path rather than Stray Scanner: a 20 s room sweep, 615 frames with 612 depth records (the first three are zero records from sensor warm-up), uploaded to the editor over Wi-Fi and loaded by `load_mikan_take`. `tools/check_take.py` reprojects LiDAR between frames thirty apart at 1.7 to 5.8 mm median per pair, which confirms the ARKit-to-OpenCV camera flip in the loader and the record alignment. `lidar_tsdf` with the default config (185 training frames, 20 held out, 1.5 cm voxels, 32 s to fuse on the CPU): 1.38 cm MAE, 10.2 edge px, 99.8 percent completeness, 0.58 percent floaters, 0.44 percent unsupported. That sits between the tabletop and hotel-room baselines, as a short sweep with little loop drift should. The top-down render shows the floor, a desk with objects, and the walls as one surface.
+
 ## Ten captures (`out/summary.md`)
 
 Nine convention booth tabletops (CRT and LCD screens, glass cases, transparent bins, cloth, people walking through) plus the hotel room, baseline and the three shipping-plausible runs on each. Means over the ten:
