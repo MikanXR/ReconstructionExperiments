@@ -160,9 +160,25 @@ def main() -> None:
         result = fusion.fuse(cache, capture, train_ids, cfg["fusion"])
         o3d.io.write_triangle_mesh(str(out_dir / "mesh_raw.ply"), result.mesh_raw)
         o3d.io.write_triangle_mesh(str(out_dir / "mesh.ply"), result.mesh)
+        # A fusion that refined the poses leaves them beside the mesh, so a
+        # later eval or render stage scores the mesh in the frame it was built in.
+        poses_path = out_dir / "poses_refined.npy"
+        if result.poses is not None:
+            np.save(poses_path, result.poses)
+        elif poses_path.exists():
+            poses_path.unlink()
         metrics["fusion"] = result.stats
         save_metrics(metrics_path, metrics, "fuse")
         print(f"fuse: {result.stats['triangles_clean']:,} triangles ({result.stats['triangles_removed_as_islands']:,} island triangles removed) in {result.stats['fuse_seconds']:.0f}s")
+        f2m = result.stats.get("frame_to_model")
+        if f2m:
+            print(f"frame-to-model: {f2m['accepted']} accepted / {f2m['rejected']} rejected ({f2m['skipped']} skipped), "
+                  f"rms {f2m['mean_rms_before_mm']:.1f} -> {f2m['mean_rms_after_mm']:.1f} mm, "
+                  f"final correction {f2m['final_correction_translation_mm']:.0f} mm {f2m['final_correction_rotation_deg']:.2f} deg")
+
+    if ("eval" in stages or "render" in stages) and (out_dir / "poses_refined.npy").exists():
+        capture.T_WC = np.load(out_dir / "poses_refined.npy")
+        print("using the fusion's refined poses for evaluation")
 
     if "eval" in stages or "render" in stages:
         mesh = o3d.io.read_triangle_mesh(str(out_dir / "mesh.ply"))

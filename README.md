@@ -70,6 +70,16 @@ The pose track stores raw ARKit camera transforms, which `recon.capture.load_mik
 
 `--stage` is one of `depth`, `fuse`, `eval`, `render`, `report`, or `all` (default). `--tag` names a variant so it gets its own output directory (`out/<capture>/<method>_<tag>/`), `--config` swaps the whole settings file (`configs/fine.yaml` fuses at 8 mm voxels for tabletop captures), and `--opt key.path=value` overrides single settings, for example `--opt da3.model=depth-anything/DA3-LARGE-1.1`. A tagged run reuses the untagged run's depth cache when the method settings match, so fusion variants do not re-run the model. Outputs land in `out/<capture>/<method>/` and the comparison table in `out/<capture>/report.md`.
 
+## Pose refinement
+
+`fusion.frame_to_model` in the config turns the fusion into KinectFusion's loop: before each training frame is integrated, the volume so far is ray cast from the frame's predicted pose (`DenseTSDF.raycast`) and the frame is registered against that model map by projective point-to-plane ICP (`recon/register.py`). The prediction is the ARKit pose carried forward by the previous frame's correction, so the refinement follows accumulated drift, and a prior on the deviation from that prediction (`prior_sigma_m`, `prior_sigma_deg`) holds whatever a frame's geometry leaves unconstrained, such as the directions along a wall that is all the frame sees. The refined pose of every frame, held-out frames taking their nearest training frame's correction, is saved as `poses_refined.npy` beside the mesh and used by the eval and render stages, so the mesh is scored in the frame it was built in. It is off by default:
+
+```
+python run.py lidar_tsdf --capture <take>.mp4 --opt fusion.frame_to_model.enabled=true --tag f2m
+```
+
+`tools/test_register.py` checks the ray cast and the registration on a synthetic room corner.
+
 ## How the comparison works
 
 - Every 3rd frame is a keyframe. Every 10th keyframe is held out of fusion.

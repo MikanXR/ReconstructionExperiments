@@ -19,6 +19,26 @@ fusion:
   gradient_cull: 0.08      # relative depth jump to a 4-neighbour that culls a pixel
   min_weight: 0.001        # per-pixel weight below which a pixel is skipped
   min_component_triangles: 500
+  # Frame-to-model registration (KinectFusion's loop): off by default so
+  # the baseline numbers stand. Turn on with --opt fusion.frame_to_model.enabled=true
+  # and a tag. A frame whose solve moves further than the max_correction
+  # bounds keeps its prior.
+  frame_to_model:
+    enabled: false
+    warmup_frames: 3          # frames integrated at the prior before registration starts
+    iterations: 10
+    subsample: 1              # use every pixel; 2 halves the work per axis
+    max_correspondence_m: 0.10
+    max_normal_angle_deg: 30
+    huber_m: 0.02
+    data_sigma_m: 0.005       # point-to-plane noise of one LiDAR pixel, the unit the prior is read against
+    prior_sigma_m: 0.003      # how far the data may pull a frame from its carried-forward ARKit pose per step
+    prior_sigma_deg: 0.2
+    normal_stencil_voxels: 2  # TSDF gradient stencil for the model normals
+    min_correspondences: 2000
+    max_correction_m: 0.15    # per frame, against the carried-forward prior; an ARKit tracking jump is 5 to 10 cm
+    max_correction_deg: 5.0
+    integrate_rejected: false # a rejected frame is skipped rather than fused at a pose the data disagree with
 
 # Per-method options. Each block is optional; the method module's defaults
 # apply when a key is absent. Override single keys with run.py --opt.
