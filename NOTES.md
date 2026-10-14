@@ -108,6 +108,21 @@ What the numbers say. The body of the distribution is back where the short sweep
 
 Two things the streamer could add to make this better: the frame's `ARCamera.trackingState` in the pose track, so a fusion can treat limited-tracking frames the way it now treats rejected ones, and the raw LiDAR sample points if ARKit ever exposes them, which would replace the upsampled map's correlated noise with a few hundred independent returns.
 
+## Image-space edge refinement (`tools/edge_refine_eval.py`)
+
+The filter MikanXR's `DepthEdgeRefineNode` runs, prototyped here on the room loop take with the `lidar_tsdf_f2mq` mesh and its refined poses, six held-out frames at 1920x1440, scored against the held-out LiDAR's edges at 256x192. The first rule tried, a joint bilateral two-sided vote with a spatial Gaussian of half the band radius, moved nothing: 9.44 px before, 9.46 after, 2.5 percent of pixels touched. The far side's own colour-matching pixels next to the edge outvote the near side, so the edge can move two or three pixels at most whatever the radius, and the mesh's silhouettes sit ten to twenty video pixels off the picture's. The rule became a two-prototype classification: the window splits at its midpoint depth, each side's mean colour is its prototype, and the pixel joins the side its own colour is nearer to, at that side's mean depth, unless the prototypes are closer than the colour threshold. Box weights, so the reach is the whole radius.
+
+| radius | sigma | edge px | matched | pixels changed |
+|---|---|---|---|---|
+| prior | | 9.44 | 38.3% | |
+| 8 | 0.10 | 9.11 | 40.2% | 1.2% |
+| 16 | 0.10 | 9.03 | 37.5% | 5.4% |
+| 16 | 0.20 | 9.00 | 40.1% | 3.1% |
+| 32 | 0.05 | 10.24 | 27.2% | 28.3% |
+| 32 | 0.20 | 9.18 | 36.7% | 12.2% |
+
+Radius 16 with a 0.2 colour threshold is the default that landed in the node. The gain reads small on this metric because the LiDAR edges are blocky at 7.5 video pixels per LiDAR pixel and carry the sensor's blur, so a refined edge that follows the picture can score level with the prior; the contact sheets show the whale plush's silhouette, which the mesh overshoots by ten to twenty pixels, pulled onto the plush. Radius 32 with a small threshold over-reaches, moving a quarter of the pixels and losing matches. Hand-marked frames are the measure that would separate the two effects.
+
 ## Ten captures (`out/summary.md`)
 
 Nine convention booth tabletops (CRT and LCD screens, glass cases, transparent bins, cloth, people walking through) plus the hotel room, baseline and the three shipping-plausible runs on each. Means over the ten:

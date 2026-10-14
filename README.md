@@ -51,7 +51,7 @@ A MikanARStreamer take loads the same way: `<take>.mp4` with its `<take>.pose.js
 python run.py lidar_tsdf --capture D:\path\to\take_20261013_120000.mp4
 ```
 
-The pose track stores raw ARKit camera transforms, which `recon.capture.load_mikan_take` rotates into the OpenCV camera axes every method expects; the Stray Scanner loader needs no such step because that app bakes the rotation in. `Capture.check_pose_consistency(a, b)` is the check for a new take: with correct poses, LiDAR reprojected between frames thirty apart agrees to a few millimetres median. `tools/check_take.py <take>.mp4` runs it over the take, and `tools/take_diagnostics.py <take>.mp4` explains a fused run's held-out error: by range and tail, against camera speed, and as start-to-end loop drift.
+The pose track stores raw ARKit camera transforms, which `recon.capture.load_mikan_take` rotates into the OpenCV camera axes every method expects; the Stray Scanner loader needs no such step because that app bakes the rotation in. `Capture.check_pose_consistency(a, b)` is the check for a new take: with correct poses, LiDAR reprojected between frames thirty apart agrees to a few millimetres median. `tools/check_take.py <take>.mp4` runs it over the take, and `tools/take_diagnostics.py <take>.mp4` explains a fused run's held-out error: by range and tail, against camera speed, and as start-to-end loop drift. `tools/edge_refine_eval.py <take>.mp4 --mesh <mesh.ply>` prototypes the editor's image-space edge refinement on a fused mesh and scores it against the held-out LiDAR edges, with `--sweep` over the band radius and colour threshold.
 
 ## Running
 
