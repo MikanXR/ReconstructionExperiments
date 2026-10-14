@@ -118,6 +118,8 @@ def main() -> int:
     ap.add_argument("movie", help="path to <take>.mp4")
     ap.add_argument("--run", default="lidar_tsdf", help="run directory under out/<take>/ holding mesh.ply")
     ap.add_argument("--config", default="configs/default.yaml", help="the config the run used, for the frame split")
+    ap.add_argument("--arkit-poses", action="store_true",
+                    help="score with the recorded ARKit poses even when the run refined them")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open(ROOT / args.config))
@@ -129,7 +131,14 @@ def main() -> int:
     scene = make_scene(o3d.io.read_triangle_mesh(str(mesh_path)))
     _, holdout_ids = capture.split(cfg["keyframe_stride"], cfg["holdout_every"])
 
-    print(f"{capture.name} / {args.run}: {len(capture)} frames, {len(holdout_ids)} held out")
+    # A run that refined its poses is scored in that frame, as run.py does.
+    poses_path = mesh_path.parent / "poses_refined.npy"
+    refined = poses_path.exists() and not args.arkit_poses
+    if refined:
+        capture.T_WC = np.load(poses_path)
+
+    print(f"{capture.name} / {args.run}: {len(capture)} frames, {len(holdout_ids)} held out"
+          + (", refined poses" if refined else ""))
     rows = heldout_errors(scene, capture, holdout_ids)
     report_range_and_tail(rows)
     report_speed(rows, capture)
