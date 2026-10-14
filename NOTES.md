@@ -87,6 +87,27 @@ A 57 s walk around the same room, returning to the start: 1646 frames, 16.6 m of
 
 `lidar_tsdf` at 1.5 cm (494 training frames, 55 held out, 424 s on the CPU): 2.35 cm MAE, 8.7 edge px, 100 percent completeness, 0.53 percent floaters. Held-out median error 1.07 cm, against 0.39 cm on the short room sweep of the same room and 0.56 cm on the tabletop, so the body of the distribution doubled rather than the tail: pixels over 5 cm carry 51 percent of the error here against 72 percent on the tabletop, and the per-frame error does not track camera speed (correlation -0.28). That is accumulated pose drift between the views that fused a surface and the view that scores it, the same effect the hotel room showed (1.75 cm MAE, 11.2 edge px over 973 training frames), and it is what a pose refinement has to remove. The top-down render is a clean floor plan: desk, couch, chairs, the corridor, straight walls, no doubled surfaces visible at this scale.
 
+## Frame-to-model registration on the room loop (`lidar_tsdf_f2m*`)
+
+KinectFusion's loop as `fusion.frame_to_model`: ray cast the volume from the frame's predicted pose, projective point-to-plane ICP against that map, integrate at the refined pose, carry the correction forward as the next prediction, and score the held-out frames at their nearest integrated frame's correction. Four runs on `take_20261013_154718`, all 1.5 cm voxels, 494 training frames, CPU:
+
+| run | MAE cm | edge px | held-out median cm | end-to-end seam | fuse s |
+|---|---|---|---|---|---|
+| lidar_tsdf (ARKit poses) | 2.35 | 8.72 | 1.07 | 31 mm, 0.94 deg | 424 |
+| f2m: ICP, no prior | 1.80 | 8.11 | 0.54 | 41 mm, 1.38 deg | 701 |
+| f2mp: + prior, 2-voxel normals | 1.74 | 8.07 | 0.52 | 37 mm, 1.27 deg | 800 |
+| f2mq: + skip rejected, 15 cm bound | 1.59 | 7.85 | 0.49 | 30 mm, 1.11 deg | 772 |
+
+What each step fixed, found on synthetic planes (`tools/test_register.py`) and confirmed on the take:
+
+- A trilinear sample at the rim of an observed patch blends the band with the unobserved +1 and reads as a zero crossing with an in-plane normal: a fake wall around every patch that the solve slides toward. Any sample touching an unobserved voxel now reads as unobserved.
+- One-voxel central differences give the model normals 2.4 percent noise, which makes an unobservable direction (along a lone wall or floor) look stiff and lets the first iteration's large residual push the pose sideways. A two-voxel stencil brings that to 0.9 percent, and a prior on the deviation from the carried-forward ARKit pose (3 mm, 0.2 degrees, against a 5 mm data sigma) holds what is left: a floor-only frame then slips under 3 mm while a fully constrained 54 mm displacement is still recovered to 0.5 mm.
+- ARKit jumped 56 mm in one frame at frame 844, a tracking correction, after which the model disagreed with the frames by 11 cm. Under a 10 cm bound four frames were rejected and, worse, integrated at the stale pose, which put the held-out frame between them at 8.6 cm error. Rejected frames are now skipped, and the bound is 15 cm so a jump is absorbed in one accepted step (107 mm at frame 846).
+
+What the numbers say. The body of the distribution is back where the short sweep of the same room was (0.49 against 0.39 cm median), so the drift accumulated along the walk is what the refinement removed, and MAE fell by a third. The seam did not move: ARKit's own relocalisation already closes the loop to about 3 cm and 1 degree, and frame-to-model drifts the same way on a loop, so a loop constraint would be the next thing to add rather than a replacement. The per-step corrections have a 10 mm median across the direction of travel (not along it: the implied depth-to-pose time offset is 0 ms, and shifting the poses by a frame in either direction only makes the reprojection check worse), which is consistent with ARKit's upsampled depth warping a few millimetres per frame. The fused surface averages that out; the pose track inherits it. Fusion time rises by about 80 percent on the CPU, almost all of it the ray cast at 256x192 with 164 samples per ray.
+
+Two things the streamer could add to make this better: the frame's `ARCamera.trackingState` in the pose track, so a fusion can treat limited-tracking frames the way it now treats rejected ones, and the raw LiDAR sample points if ARKit ever exposes them, which would replace the upsampled map's correlated noise with a few hundred independent returns.
+
 ## Ten captures (`out/summary.md`)
 
 Nine convention booth tabletops (CRT and LCD screens, glass cases, transparent bins, cloth, people walking through) plus the hotel room, baseline and the three shipping-plausible runs on each. Means over the ten:
