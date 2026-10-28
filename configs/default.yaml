@@ -17,6 +17,8 @@ fusion:
   bounds_margin: 0.3       # metres added around the training LiDAR cloud
   max_voxels: 60000000     # voxel_size grows until the grid fits
   gradient_cull: 0.08      # relative depth jump to a 4-neighbour that culls a pixel
+  gradient_cull_keep_near: false # a bad pair culls only its farther pixel
+  gradient_cull_radius: 1   # with keep_near, background pixels this many pixels from a near edge are culled too
   min_weight: 0.001        # per-pixel weight below which a pixel is skipped
   min_component_triangles: 500
   # Frame-to-model registration (KinectFusion's loop): off by default so

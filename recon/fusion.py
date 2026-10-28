@@ -60,10 +60,15 @@ def training_bounds(capture: Capture, train_ids, cfg: dict) -> tuple[np.ndarray,
     return lo - cfg["bounds_margin"], hi + cfg["bounds_margin"]
 
 
-def cull_flying_pixels(depth: torch.Tensor, threshold: float) -> torch.Tensor:
+def cull_flying_pixels(depth: torch.Tensor, threshold: float, keep_near: bool = False, radius: int = 1) -> torch.Tensor:
     """Mask out pixels whose depth jumps by more than `threshold` (relative)
     to any 4-neighbour. These sit on silhouettes where the sensor or the model
-    interpolates between foreground and background."""
+    interpolates between foreground and background. Both pixels of a bad pair
+    go, or with keep_near only the farther one, so a near object keeps its
+    outermost silhouette pixels. With keep_near and a radius past 1, every pixel
+    farther than the nearest valid depth within the radius by the threshold goes
+    too: background pixels that close to a near edge would otherwise carve the
+    near object's side as free space. Mirrors MikanXR's TsdfVolume::cullFlyingPixels."""
     valid = torch.isfinite(depth) & (depth > 0)
     d = torch.where(valid, depth, torch.zeros_like(depth))
     keep = valid.clone()
@@ -73,8 +78,17 @@ def cull_flying_pixels(depth: torch.Tensor, threshold: float) -> torch.Tensor:
         va = valid[dy:, dx:] & valid[: d.shape[0] - dy, : d.shape[1] - dx]
         rel = (a - b).abs() / torch.maximum(torch.minimum(a, b), torch.full_like(a, 1e-6))
         bad = va & (rel > threshold)
-        keep[dy:, dx:] &= ~bad
-        keep[: d.shape[0] - dy, : d.shape[1] - dx] &= ~bad
+        if keep_near:
+            keep[dy:, dx:] &= ~(bad & (a > b))
+            keep[: d.shape[0] - dy, : d.shape[1] - dx] &= ~(bad & (b > a))
+        else:
+            keep[dy:, dx:] &= ~bad
+            keep[: d.shape[0] - dy, : d.shape[1] - dx] &= ~bad
+    if keep_near and radius > 1:
+        far = torch.where(valid, d, torch.full_like(d, float("inf")))
+        nearest = -torch.nn.functional.max_pool2d(-far[None, None], 2 * radius + 1, stride=1, padding=radius)[0, 0]
+        rel = (d - nearest).abs() / torch.maximum(torch.minimum(d, nearest), torch.full_like(d, 1e-6))
+        keep &= ~(valid & (rel > threshold))
     return keep
 
 
@@ -186,7 +200,8 @@ class DenseTSDF:
         dev = self.device
         d = torch.as_tensor(depth, device=dev, dtype=torch.float32)
         w = torch.as_tensor(weight, device=dev, dtype=torch.float32)
-        keep = cull_flying_pixels(d, cfg["gradient_cull"]) & (w >= cfg["min_weight"])
+        keep = cull_flying_pixels(d, cfg["gradient_cull"], cfg.get("gradient_cull_keep_near", False),
+                                  cfg.get("gradient_cull_radius", 1)) & (w >= cfg["min_weight"])
         keep &= (d >= cfg["depth_min"]) & (d <= cfg["depth_max"])
         if not bool(keep.any()):
             return
