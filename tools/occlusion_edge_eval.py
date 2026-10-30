@@ -375,23 +375,19 @@ def contact_sheet(ctx: Context, preds: dict[str, np.ndarray], path: Path) -> Non
     cv2.imwrite(str(path), cv2.cvtColor(np.vstack(rows), cv2.COLOR_RGB2BGR))
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--root", type=Path, default=ROOT / "out" / "live_occlusion")
-    parser.add_argument("--out", type=Path, default=None)
-    parser.add_argument("--methods", default=",".join(METHODS))
-    args = parser.parse_args()
-    out = args.out or args.root / "eval"
+def evaluate_folders(root: Path, out: Path, methods: dict) -> list[dict]:
+    """Run every method on every marked folder under root, write the contact sheets and results.csv."""
     out.mkdir(parents=True, exist_ok=True)
-    names = args.methods.split(",")
-
     rows = []
-    for folder in sorted(p for p in args.root.iterdir() if (p / "gt_mask.png").exists()):
+    for folder in sorted(p for p in root.iterdir() if (p / "gt_mask.png").exists()):
         ctx = load_context(folder)
+        if not ctx.prior.any():
+            print(f"{folder.name}: skipped, the mesh covers none of the marked occluder so there is no prior")
+            continue
         preds = {}
-        for name in names:
+        for name, method in methods.items():
             t0 = time.perf_counter()
-            pred = METHODS[name](ctx)
+            pred = method(ctx)
             elapsed = time.perf_counter() - t0
             preds[name] = pred
             rows.append({"capture": ctx.name, "method": name, "seconds": round(elapsed, 2), **score(ctx, pred)})
@@ -402,7 +398,11 @@ def main() -> None:
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
+    return rows
 
+
+def write_summary(rows: list[dict], names: list[str], out: Path) -> str:
+    """The per-method table over the rows, written to out/summary.txt and printed."""
     lines = [f"{'method':24s} {'gt>pred mean':>12s} {'median':>7s} {'p90':>6s} {'<=2px':>6s} {'<=5px':>6s}"
              f" {'pred>gt':>8s}   per-capture gt>pred mean"]
     captures = sorted({r["capture"] for r in rows})
@@ -417,6 +417,19 @@ def main() -> None:
     summary = "\n".join(lines)
     (out / "summary.txt").write_text(summary + "\n")
     print(summary)
+    return summary
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--root", type=Path, default=ROOT / "out" / "live_occlusion")
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--methods", default=",".join(METHODS))
+    args = parser.parse_args()
+    out = args.out or args.root / "eval"
+    names = args.methods.split(",")
+    rows = evaluate_folders(args.root, out, {name: METHODS[name] for name in names})
+    write_summary(rows, names, out)
 
 
 if __name__ == "__main__":

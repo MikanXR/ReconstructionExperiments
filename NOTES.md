@@ -133,6 +133,51 @@ Error split: on the live angles the mesh can is 22 to 40 px too thin in three of
 
 The thinning is the flying pixel cull. Variants fused by `MikanCmd -occlusionMesh` at 8 mm and scored on the four marked take frames, width error per side: symmetric cull (both pixels of a bad pair) -2.3 mm, keep the near pixel -1.9, keep near and cull the far side within 2 px +0.4, within 3 px +2.0, no cull -3.8. Background pixels next to a near edge carve the object's side as free space; dropping them within 2 LiDAR pixels stops it. The same cull here (`fusion.gradient_cull_keep_near`, `gradient_cull_radius`, off by default so earlier runs compare) on the room loop with frame-to-model (`lidar_tsdf_f2m_v0` against `_v3`): median 5.28 to 5.21 mm, MAE 1.59 to 1.56 cm, edge 7.85 to 7.81 px, completeness 100 percent both, registration 491 of 491 both, floaters 0.39 to 0.61 percent. MikanXR made keep near with a 2 px band its default.
 
+## SAM2 prompted from the mesh silhouette (`tools/sam2_edge_eval.py`, `tools/sam2_track_eval.py`)
+
+SAM2 (Apache 2.0, the `sam2` 1.1.0 PyPI release with the SAM 2.1 checkpoints, in `.venv_sam2`) prompted from the occlusion mesh's silhouette on the ten hand-marked can frames in `out/live_occlusion`, the six live angles and the four take frames, scored by `occlusion_edge_eval.py` on the occluding edges at 1920x1440 as above. The band methods stop at the band: on the can's missing cap and the shifted views the prior is wrong past any band, which is where every p90 of 36 to 100 px comes from, and the question was whether an object segmenter recovers that. The prior is the mesh region nearer than the harness's threshold, the can and the desk it stands on, so the naive prompts fail: the prior's bounding box segments can and desk together (2.3 to 5.7 px median, 40 to 100 px p90 by model), points sampled over the prior land on the desk (14 to 38 px median), and the prior handed to the decoder as its dense mask prompt is unstable across sizes (2.9 px median on small, 43 on tiny). The prompts that work follow the occluding contour: the prior's outline is probed 45 px either side along its normal and kept where the mesh depth jumps, the kept stretches are grouped into runs, and each run is prompted on its own with positive points just inside it at the thickest spot within two bands (band 24 px), the runs' masks unioned. Among the three multimask outputs the one nearest the prior inside the run's box is kept. Median / p90 of the distance from the marked occluding edge to the mask's boundary, and the share within 5 px, over the ten frames:
+
+| prompt | tiny | small | base_plus | large |
+|---|---|---|---|---|
+| mesh | 17.8 / 67 / 0.19 | | | |
+| trimap vote, band 45 | 3.2 / 36 / 0.68 | | | |
+| contour snapping | 3.3 / 51 / 0.67 | | | |
+| runs, positive points | 1.6 / 10.0 / 0.90 | 1.3 / 6.3 / 0.94 | 1.6 / 5.2 / 0.93 | 1.6 / 5.8 / 0.93 |
+| runs, box and positives | 1.6 / 20.3 / 0.85 | 1.4 / 16.7 / 0.90 | 1.5 / 14.4 / 0.89 | 2.2 / 18.6 / 0.85 |
+| runs, box, positives and negatives | 2.4 / 16.1 / 0.83 | 1.7 / 14.8 / 0.90 | 2.8 / 9.0 / 0.77 | 2.2 / 9.5 / 0.86 |
+| runs, box and positives, refined once | 1.9 / 22.1 / 0.81 | 2.3 / 20.3 / 0.81 | 1.9 / 19.8 / 0.80 | 1.3 / 13.9 / 0.91 |
+| whole prior, box | 2.3 / 39.5 / 0.78 | 4.5 / 101 / 0.71 | 5.7 / 75 / 0.63 | 3.0 / 82 / 0.72 |
+| whole prior, dense mask | 42.7 / 131 / 0.35 | 2.9 / 7.9 / 0.79 | 6.0 / 43 / 0.50 | 4.8 / 39 / 0.59 |
+
+Positive points per run are the prompt, and the model size barely matters past tiny. On the hardest view, angle 5, where the mesh sits 60 px left of the can and the mesh's mean distance is 80 px, the runs prompt lands at 10 to 13 px mean on every size and the black cap is in the mask. The per-run box costs p90 there, since a box grown by one band around a mesh that is off by more than the band cuts the can. Negatives are the risk the design predicted: where the mesh is short by more than the band they land on the object, as they do on the cap, and they hurt on every size at band 24 and more at band 45 (tiny, band 45: positives 1.7 / 18.5 / 0.89, with the box 1.5 / 12.9 / 0.91, with negatives 3.1 / 21.6 / 0.77). Feeding the chosen logits back for a second pass gains nothing except on large. The whole 1920x1440 frame through the 1024 encoder instead of the crop (tiny, positives: 1.6 / 11.2 / 0.88) costs nothing for an object this size.
+
+Tracking: the take's 481 frames from 2 to 18 s decoded from the capture (each marked frame matched against its decoded frame at under 1 of 255 mean absolute difference), one prompt on the first marked frame from its prior, `propagate_in_video` through the rest, scored at the four marked frames, with the same prompt in image mode on each of those frames alone beside it:
+
+| model, prompt | image mode | tracked from the first frame |
+|---|---|---|
+| small, positives | 1.0 / 2.9 / 0.97 | 1.3 / 5.6 / 0.92 |
+| small, box and positives | 1.0 / 3.1 / 0.96 | 1.3 / 5.4 / 0.94 |
+| tiny, positives | 1.1 / 3.3 / 0.95 | lost after 17 frames |
+| tiny, box and positives | 0.9 / 3.3 / 0.95 | 1.3 / 3.1 / 0.97 |
+| small, the prior as a mask | | 4.6 / 27.9 / 0.70 |
+
+The video predictor picks among its multimask outputs by its own score, with no prior to steer it. Tiny's points-only prompt chose a 486,000 px region on the first frame, the can and the desk, where small chose 191,000, and lost it 17 frames in; the box pins it, and tiny with the box is the best tracked result. The mask prompt is taken as the prompted frame's output as it is (20.9 px there, the mesh's own 20.8) and refined only on the following frames: 1 to 2 px by 6 and 10 s, 12 px at 18 s.
+
+Cost on the RTX 3090 (`tools/sam2_timing.py`, CUDA, bfloat16, the 1920x1440 frame through the 1024 encoder, median of 50): encoder plus decoder tiny 26.0 + 8.6 ms, small 29.9 + 8.5, base_plus 40.4 + 8.8, large 84.3 + 8.7. The tracker's step per frame (`propagate_in_video`, including the mask resized to the video size on the host): tiny 52 ms, small 56, base_plus 66, large 109. Under DirectML, the runtime the editor uses (the image encoder exported to ONNX by `tools/sam2_export_encoder.py`, matching torch to 1e-5, timed by `tools/sam2_dml_timing.py` on onnxruntime-directml 1.24.4): tiny 67 ms, small 75, about 2.5 times CUDA. A bare `image_size` 512 override fails in sam2 1.1.0 with a view over a non-contiguous tensor in the Hiera trunk, so the smaller real-time configuration was not timed.
+
+The objectness claim holds on the can: the segmenter puts the edge where the mesh, the vote and the contour snap cannot, including a part the LiDAR never returned. `tools/render_take_frames.py` renders a mesh into chosen frames of a take offline in the folder format `mark_silhouette.py` marks, so other takes can be marked without the editor; against the editor's own render of the V2 can mesh at the four marked times it agrees at IoU 0.998 to 1.000 with the frame index mapping exact, and the 1 to 4 px outline distance that remains sits on the mesh's ragged border at the top of the frame, with a half-pixel principal point difference the likely cause.
+
+Three more sets were rendered that way and marked by hand, one occluder per frame (`out/mark_cup`, `out/mark_room`, `out/mark_duster`, scored into `out/sam2_edges_<set>`): the cup take with `cup_v3.glb` at its refined poses (the book, the open laptop, the cup, the chair back; the plant at 22 s has no mesh at all inside its outline and is skipped, since without a prior there is nothing to prompt from), the room walk with `noreg.glb` at recorded poses (the chair back, a plush on the couch arm, the air filter on the shelf, a plush and the backpack, the cat tree), and the 10-29 desk take with the mesh built from it (the duster can, the plush, the box, the mouse). The room's mesh is the worst prior yet, 46 px median off the marked edges. Median / p90 / within 5 px, the prompt being positive points per occluding run:
+
+| set | frames | mesh | best band method | tiny | small | large |
+|---|---|---|---|---|---|---|
+| can | 10 | 17.8 / 67 / 0.19 | 3.2 / 36 / 0.68 | 1.6 / 10.0 / 0.90 | 1.3 / 6.3 / 0.94 | 1.6 / 5.8 / 0.93 |
+| cup | 4 | 11.2 / 19 / 0.25 | 0.8 / 7.1 / 0.87 | 1.4 / 7.5 / 0.90 | 1.0 / 2.7 / 0.98 | 1.6 / 6.3 / 0.91 |
+| room | 5 | 46.0 / 106 / 0.13 | 23.8 / 120 / 0.42 | 1.8 / 7.8 / 0.88 | 1.4 / 6.0 / 0.91 | 2.4 / 9.3 / 0.82 |
+| duster | 5 | 5.6 / 26 / 0.48 | 2.3 / 9.2 / 0.76 | 1.8 / 10.5 / 0.90 | 1.7 / 3.7 / 0.94 | 1.3 / 3.4 / 0.96 |
+
+Small is the consistent size: under 1.5 px median and 6.3 px p90 on every set, with at least 91 percent of the marked edge within 5 px, whether the mesh is 6 or 46 px off. The band methods track the mesh's error (contour snapping is excellent on the cup, where the mesh is close, and useless in the room) and the segmenter does not. The box helps where the mesh is accurate (duster: runs with box, or box and positives refined once, 1.0 to 1.2 px median and 2.8 to 3.1 px p90 on small) and hurts where it is not (room: box and positives 2.2 / 15 / 0.78 on small against 1.4 / 6.0 / 0.91 for positives alone), as on the can, so the points-only prompt is the one that needs no knowledge of the mesh's error. Negatives hurt on every set. The whole-prior prompts fail on every set the way they failed on the can.
+
 ## Ten captures (`out/summary.md`)
 
 Nine convention booth tabletops (CRT and LCD screens, glass cases, transparent bins, cloth, people walking through) plus the hotel room, baseline and the three shipping-plausible runs on each. Means over the ten:

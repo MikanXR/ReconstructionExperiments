@@ -1,0 +1,17 @@
+# SAM2 venv (.venv_sam2) for tools/sam2_edge_eval.py, sam2_track_eval.py and sam2_timing.py. The shared
+# .venv carries a CPU torch, so SAM2 gets its own. Install torch from the CUDA index first, then the
+# shared requirements, then this file. sam2 1.1.0 is the PyPI release of facebookresearch/sam2 with the
+# SAM 2.1 configs inside the package; installing it after torch keeps pip from pulling a CPU torch.
+#   python -m venv .venv_sam2
+#   .venv_sam2\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#   .venv_sam2\Scripts\python -m pip install -r requirements.txt
+#   .venv_sam2\Scripts\python -m pip install -r requirements-sam2.txt
+# Checkpoints go to models/sam2 (gitignored), one curl each:
+#   https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_{tiny,small,base_plus,large}.pt
+# onnx and the CPU onnxruntime are for tools/sam2_export_encoder.py and its check against torch. The
+# DirectML runtime conflicts with onnxruntime, so tools/sam2_dml_timing.py runs in a venv of its own:
+#   python -m venv .venv_sam2_dml
+#   .venv_sam2_dml\Scripts\python -m pip install onnxruntime-directml numpy opencv-python
+sam2==1.1.0
+onnx
+onnxruntime
