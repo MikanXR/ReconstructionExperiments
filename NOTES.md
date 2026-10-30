@@ -178,6 +178,29 @@ Three more sets were rendered that way and marked by hand, one occluder per fram
 
 Small is the consistent size: under 1.5 px median and 6.3 px p90 on every set, with at least 91 percent of the marked edge within 5 px, whether the mesh is 6 or 46 px off. The band methods track the mesh's error (contour snapping is excellent on the cup, where the mesh is close, and useless in the room) and the segmenter does not. The box helps where the mesh is accurate (duster: runs with box, or box and positives refined once, 1.0 to 1.2 px median and 2.8 to 3.1 px p90 on small) and hurts where it is not (room: box and positives 2.2 / 15 / 0.78 on small against 1.4 / 6.0 / 0.91 for positives alone), as on the can, so the points-only prompt is the one that needs no knowledge of the mesh's error. Negatives hurt on every set. The whole-prior prompts fail on every set the way they failed on the can.
 
+## The C++ port in MikanXR (`tools/score_mikan_matte.py`)
+
+MikanXR's `MikanCmd -occlusionMatte` builds the matte in C++: the mesh rasterized to depth per frame, the occluding contours found on the depth map alone (no marked prior), each run prompted with its positive points into SAM 2.1 small under ONNX Runtime's DirectML provider, and a label map written per frame that says where the segmenter disagrees with the mesh inside a band around each contour. The dumped labels applied to the marked take frames' prior, scored next to the Python result on the same frames (median / p90 / within 5 px over `take_t02`, `t06`, `t10`, `t18`, mesh 11.6 / 37 / 0.29, Python crop prompt 1.0 / 2.9 / 0.97):
+
+| C++ run | median | p90 | within 5 px | segmenter per frame |
+|---|---|---|---|---|
+| band 24, every run judged by the union of the frame's masks | 3.6 | 14.3 | 0.69 | 867 ms |
+| band 24, each run judged by its own mask | 3.7 | 16.1 | 0.67 | 625 ms |
+| band 24, a small run prompted on a crop of its own | 2.9 | 16.4 | 0.70 | 1737 ms |
+| band 64, crops, each run its own mask (the shipped defaults) | 1.0 | 3.7 | 0.94 | 1688 ms |
+
+Two findings. The union was wrong by design: a two-point run on the desk beside the can returned the desk, and its mask told the can's band "occluder" where the can's own mask said background, so nothing was removed there. Each run now judges its band by its own mask, and runs shorter than 40 px are dropped as mesh noise. And the band is the reach of the correction: the marked edge points still more than 10 px from the matte on the 18 s frame sit a median 32 px from the mesh contour, past the 24 px band. Emulated in the harness by applying the Python mask only within a band of the prior's contour:
+
+| band | all ten frames median / p90 / within 5 px | take frames median / p90 |
+|---|---|---|
+| 24 | 4.7 / 45 / 0.69 | 1.3 / 16.8 |
+| 32 | 3.8 / 40 / 0.74 | 1.3 / 13.0 |
+| 48 | 1.9 / 28 / 0.83 | 1.1 / 4.6 |
+| 64 | 1.4 / 21 / 0.88 | 1.0 / 2.9 |
+| no band | 1.3 / 6.3 / 0.94 | 1.0 / 2.9 |
+
+The take frames reach the unbanded result at 64 px, which is the editor's default now; the live angles, where the mesh is off by up to 46 px, keep a 20 px p90 even there, the price of touching nothing far from a contour. The crop around a small run buys the median and the share within 2 px (0.43 to 0.55), not the p90, at 2.8 times the segmenter time; it stays on by default for a build that runs once per take. The segmenter's cost under DirectML is the decoder's inputs crossing to the device per call, which the export's split at the predictor's own feature boundary cut from 88 MB to 10 MB per call (867 to 625 ms per frame with 7 runs).
+
 ## Ten captures (`out/summary.md`)
 
 Nine convention booth tabletops (CRT and LCD screens, glass cases, transparent bins, cloth, people walking through) plus the hotel room, baseline and the three shipping-plausible runs on each. Means over the ten:
