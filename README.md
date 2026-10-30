@@ -128,3 +128,7 @@ Reading the tables:
 - MILo (36 minutes of training) gives the sharpest object outlines and the worst numbers: printed patterns on the cloth and book covers become geometric relief, and its Delaunay extraction spans the poorly observed far region with large floating triangles. Not a quality ceiling, and its license rules it out for shipping anyway.
 - No model works without the LiDAR prompt or input.
 - At room scale the differences between the two leading models are smaller than the baseline's own drift error (MAE 1.75 cm against itself), so ARKit pose refinement is now the larger lever for silhouette accuracy than the choice of depth model.
+
+## License
+
+The scripts and notes here are under the MIT License, the same as [MikanXR](https://github.com/MikanXR/MikanXR). See [LICENSE](LICENSE). The model weights the methods download keep their own licenses, listed in the methods table above.
