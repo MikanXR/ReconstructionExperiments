@@ -1,9 +1,26 @@
-"""Prompt SAM2 with the occlusion mesh's silhouette on the hand-marked frames and score its masks
-against the marked occluding edges, next to the mesh and the best band-local methods.
+"""Prompt a promptable segmenter with the occlusion mesh's silhouette on the hand-marked frames and
+score its masks against the marked occluding edges, next to the mesh and the best band-local methods.
 
-    .venv_sam2/Scripts/python tools/sam2_edge_eval.py [--root out/live_occlusion]
-        [--models tiny,small,base_plus,large] [--variants ...] [--band 24] [--full-frame]
-        [--checkpoints models/sam2] [--out out/sam2_edges]
+    .venv_sam2/Scripts/python tools/sam2_edge_eval.py [--root out/live_occlusion] [--family sam2]
+        [--models tiny,small,base_plus,large] [--size 0] [--variants ...] [--band 24] [--full-frame]
+        [--checkpoints <dir>] [--out out/<family>_edges]
+
+The families are the segmenters with a SAM-style prompt decoder that the live matte could run
+instead of SAM2, each in its own venv since two of them are forks of the sam2 package:
+
+    sam2             SAM 2.1 tiny, small, base_plus, large (.venv_sam2, the sam2 1.1.0 PyPI release)
+    edgetam          EdgeTAM, RepViT-M1 trunk (.venv_edgetam, third_party/EdgeTAM on sys.path)
+    efficienttam     EfficientTAM ti, s and their 512 variants ti_512, s_512 (.venv_efficienttam,
+                     third_party/EfficientTAM on sys.path)
+    efficientvit_sam EfficientViT-SAM l0, l1 (512 long side) and xl0 (1024) (.venv_efficientvit,
+                     third_party/efficientvit installed without its dependencies)
+
+The venvs are built as requirements-sam2.txt, requirements-edgetam.txt, requirements-efficienttam.txt
+and requirements-efficientvit.txt describe. The SAM2-API families run under bfloat16 autocast as the
+recorded SAM2 rows did; EfficientViT-SAM runs in fp32, since its predictor preprocesses on the device
+itself. --size overrides the SAM2-API families' encoder input (512 is the real-time configuration;
+the predictor's hard-coded feature sizes are set from the model's image size here, which is what
+fails in sam2 1.1.0 otherwise); EfficientViT-SAM's input is fixed by the checkpoint.
 
 Reads the marked folders occlusion_edge_eval.py reads (video.png, mesh_depth.npy, gt_mask.png). The
 prior is the mesh silhouette occlusion_edge_eval.load_context extracts, the mesh region nearer than
@@ -45,14 +62,32 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import occlusion_edge_eval as E  # noqa: E402
-from sam2.build_sam import build_sam2  # noqa: E402
-from sam2.sam2_image_predictor import SAM2ImagePredictor  # noqa: E402
 
 MODELS = {
     "tiny": ("configs/sam2.1/sam2.1_hiera_t.yaml", "sam2.1_hiera_tiny.pt"),
     "small": ("configs/sam2.1/sam2.1_hiera_s.yaml", "sam2.1_hiera_small.pt"),
     "base_plus": ("configs/sam2.1/sam2.1_hiera_b+.yaml", "sam2.1_hiera_base_plus.pt"),
     "large": ("configs/sam2.1/sam2.1_hiera_l.yaml", "sam2.1_hiera_large.pt"),
+}
+THIRD_PARTY = ROOT / "third_party"
+# Per family: the clone put on sys.path (None for an installed package), the default checkpoint
+# directory, and the models as (hydra config or model zoo name, checkpoint file)
+FAMILIES = {
+    "sam2": (None, ROOT / "models" / "sam2", MODELS),
+    "edgetam": (THIRD_PARTY / "EdgeTAM", THIRD_PARTY / "EdgeTAM" / "checkpoints", {
+        "edgetam": ("configs/edgetam.yaml", "edgetam.pt"),
+    }),
+    "efficienttam": (THIRD_PARTY / "EfficientTAM", ROOT / "models" / "efficienttam", {
+        "ti": ("configs/efficienttam/efficienttam_ti.yaml", "efficienttam_ti.pt"),
+        "ti_512": ("configs/efficienttam/efficienttam_ti_512x512.yaml", "efficienttam_ti_512x512.pt"),
+        "s": ("configs/efficienttam/efficienttam_s.yaml", "efficienttam_s.pt"),
+        "s_512": ("configs/efficienttam/efficienttam_s_512x512.yaml", "efficienttam_s_512x512.pt"),
+    }),
+    "efficientvit_sam": (THIRD_PARTY / "efficientvit", ROOT / "models" / "efficientvit_sam", {
+        "l0": ("efficientvit-sam-l0", "efficientvit_sam_l0.pt"),
+        "l1": ("efficientvit-sam-l1", "efficientvit_sam_l1.pt"),
+        "xl0": ("efficientvit-sam-xl0", "efficientvit_sam_xl0.pt"),
+    }),
 }
 CLASSICAL = ["mesh", "trimap_vote_45", "contour_dp_smooth3"]
 VARIANTS = ["box", "box_pts", "mask",
@@ -230,12 +265,62 @@ def synthesize_run_prompts(prior: np.ndarray, mesh: np.ndarray, band: int) -> li
 
 # ---- the predictor ----------------------------------------------------------------
 
+def model_paths(family: str, model: str, checkpoints: Path | None) -> tuple[str, Path]:
+    """The model's hydra config or zoo name and its checkpoint path, the clone put on sys.path."""
+    clone, default_checkpoints, models = FAMILIES[family]
+    if model not in models:
+        raise ValueError(f"unknown {family} model {model}, one of {list(models)}")
+    spec, ckpt = models[model]
+    if clone is not None and str(clone) not in sys.path:
+        sys.path.insert(0, str(clone))
+    return spec, (checkpoints or default_checkpoints) / ckpt
+
+
+def build_model(family: str, model: str, checkpoints: Path | None, size: int, device: str = "cuda"):
+    """The family's model module on the device, in eval mode."""
+    spec, ckpt_path = model_paths(family, model, checkpoints)
+    if family == "efficientvit_sam":
+        from efficientvit.sam_model_zoo import create_efficientvit_sam_model
+        if size:
+            print(f"{family} {model}: --size ignored, the input is fixed by the checkpoint")
+        return create_efficientvit_sam_model(spec, True, str(ckpt_path)).to(device).eval()
+    overrides = [f"++model.image_size={size}"] if size else []
+    if family == "efficienttam":
+        from efficient_track_anything.build_efficienttam import build_efficienttam
+        # The shipped configs torch.compile the encoder, which has no inductor backend on Windows
+        overrides = overrides + ["++model.compile_image_encoder=False"]
+        return build_efficienttam(spec, str(ckpt_path), device=device, hydra_overrides_extra=overrides)
+    from sam2.build_sam import build_sam2
+    return build_sam2(spec, str(ckpt_path), device=device, hydra_overrides_extra=overrides)
+
+
+def build_predictor(family: str, model: str, checkpoints: Path | None, size: int):
+    """The family's image predictor for the model, with set_image and the SAM predict signature.
+
+    Returns the predictor, whether it runs under bfloat16 autocast, and the encoder input size.
+    """
+    sam = build_model(family, model, checkpoints, size, "cuda")
+    if family == "efficientvit_sam":
+        from efficientvit.models.efficientvit.sam import EfficientViTSamPredictor
+        return EfficientViTSamPredictor(sam), False, sam.image_size[1]
+    if family == "efficienttam":
+        from efficient_track_anything.efficienttam_image_predictor import EfficientTAMImagePredictor
+        predictor = EfficientTAMImagePredictor(sam)
+    else:
+        from sam2.sam2_image_predictor import SAM2ImagePredictor
+        predictor = SAM2ImagePredictor(sam)
+    # The predictor hard-codes the feature sizes of a 1024 input; set them from the model's size
+    s = int(sam.image_size)
+    predictor._bb_feat_sizes = [(s // 4, s // 4), (s // 8, s // 8), (s // 16, s // 16)]
+    return predictor, True, s
+
+
 class Sam2Runner:
     """One image predictor; the embedding is set once per frame and shared by the variants."""
 
-    def __init__(self, model: str, checkpoints: Path, root: Path, full_frame: bool):
-        cfg, ckpt = MODELS[model]
-        self.predictor = SAM2ImagePredictor(build_sam2(cfg, str(checkpoints / ckpt), device="cuda"))
+    def __init__(self, model: str, checkpoints: Path | None, root: Path, full_frame: bool,
+                 family: str = "sam2", size: int = 0):
+        self.predictor, self.autocast, self.input_size = build_predictor(family, model, checkpoints, size)
         self.root, self.full_frame = root, full_frame
         self.embedded = None
         self.image_hw = None
@@ -272,7 +357,7 @@ class Sam2Runner:
         return ((low * 2.0 - 1.0) * 8.0)[None].astype(np.float32)
 
     def predict(self, **kw):
-        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16, enabled=self.autocast):
             return self.predictor.predict(**kw)
 
     def choose(self, ctx: E.Context, kw: dict, region: np.ndarray, by_score: bool, iterate: bool) -> np.ndarray:
@@ -353,31 +438,41 @@ def make_method(runner: Sam2Runner, variant: str, band: int):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--root", type=Path, default=ROOT / "out" / "live_occlusion")
-    parser.add_argument("--models", default=",".join(MODELS))
+    parser.add_argument("--family", default="sam2", choices=list(FAMILIES))
+    parser.add_argument("--models", default=None, help="comma separated, default every model of the family")
+    parser.add_argument("--size", type=int, default=0, help="encoder input override for the SAM2-API families")
     parser.add_argument("--variants", default=",".join(VARIANTS))
     parser.add_argument("--band", type=int, default=24)
     parser.add_argument("--full-frame", action="store_true")
-    parser.add_argument("--checkpoints", type=Path, default=ROOT / "models" / "sam2")
-    parser.add_argument("--out", type=Path, default=ROOT / "out" / "sam2_edges")
+    parser.add_argument("--checkpoints", type=Path, default=None, help="default per family, see FAMILIES")
+    parser.add_argument("--out", type=Path, default=None, help="default out/<family>_edges")
     args = parser.parse_args()
-    args.out.mkdir(parents=True, exist_ok=True)
-    suffix = "_full" if args.full_frame else ""
+    out = args.out or ROOT / "out" / f"{args.family}_edges"
+    out.mkdir(parents=True, exist_ok=True)
+    suffix = ("_full" if args.full_frame else "") + (f"_{args.size}" if args.size else "")
+    models = args.models.split(",") if args.models else list(FAMILIES[args.family][2])
 
     summaries = []
-    for model in args.models.split(","):
-        runner = Sam2Runner(model, args.checkpoints, args.root, args.full_frame)
+    for model in models:
+        try:
+            runner = Sam2Runner(model, args.checkpoints, args.root, args.full_frame, args.family, args.size)
+        except Exception as exc:
+            line = f"== {args.family} {model}{suffix}: failed to build: {str(exc).splitlines()[0][:200]}"
+            print(line)
+            summaries.append(line)
+            continue
         methods = {name: E.METHODS[name] for name in CLASSICAL}
         for variant in args.variants.split(","):
             methods[f"sam2_{variant}"] = make_method(runner, variant, args.band)
-        model_out = args.out / (model + suffix)
-        print(f"== {model}{suffix}")
+        model_out = out / (model + suffix)
+        print(f"== {args.family} {model}{suffix}, input {runner.input_size}")
         rows = E.evaluate_folders(args.root, model_out, methods)
         summary = E.write_summary(rows, list(methods), model_out)
-        summaries.append(f"== {model}{suffix}, band {args.band}\n{summary}")
+        summaries.append(f"== {args.family} {model}{suffix}, input {runner.input_size}, band {args.band}\n{summary}")
         del runner
         torch.cuda.empty_cache()
 
-    (args.out / f"summary_all{suffix}.txt").write_text("\n\n".join(summaries) + "\n")
+    (out / f"summary_all{suffix}.txt").write_text("\n\n".join(summaries) + "\n")
 
 
 if __name__ == "__main__":

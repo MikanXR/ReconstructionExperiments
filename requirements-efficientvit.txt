@@ -1,0 +1,22 @@
+# EfficientViT-SAM venv (.venv_efficientvit) for tools/sam2_edge_eval.py --family efficientvit_sam and
+# sam2_timing.py. The efficientvit package is installed editable without its dependencies (its setup.py
+# wants wandb, diffusers, lvis and more) and the few it needs for SAM come from this file.
+#   git clone --depth 1 https://github.com/mit-han-lab/efficientvit third_party/efficientvit
+#   py -3.11 -m venv .venv_efficientvit
+#   .venv_efficientvit\Scripts\python -m pip install -U pip
+#   .venv_efficientvit\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#   .venv_efficientvit\Scripts\python -m pip install -r requirements.txt
+#   .venv_efficientvit\Scripts\python -m pip install --no-deps -e third_party/efficientvit
+#   .venv_efficientvit\Scripts\python -m pip install -r requirements-efficientvit.txt
+# Checkpoints and the authors' ONNX encoders go to models/efficientvit_sam (gitignored):
+#   hf download mit-han-lab/efficientvit-sam efficientvit_sam_l0.pt efficientvit_sam_l1.pt efficientvit_sam_xl0.pt onnx/l0_encoder.onnx onnx/l1_encoder.onnx onnx/xl0_encoder.onnx onnx/l0_decoder.onnx onnx/l1_decoder.onnx onnx/xl0_decoder.onnx --local-dir models/efficientvit_sam
+# efficientvit.models.nn imports triton at module level for an RMSNorm kernel the SAM models never
+# call; triton-windows satisfies the import.
+timm
+einops
+omegaconf
+triton-windows
+onnx
+onnxsim
+onnxruntime
+segment_anything @ git+https://github.com/facebookresearch/segment-anything.git

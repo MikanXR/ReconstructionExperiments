@@ -1,0 +1,20 @@
+# EdgeTAM venv (.venv_edgetam) for tools/sam2_edge_eval.py --family edgetam, sam2_timing.py and
+# sam2_export_encoder.py. EdgeTAM is a fork of the sam2 package under the same name, so it cannot share
+# .venv_sam2; the clone is put on sys.path by sam2_edge_eval.py rather than pip installed. Python 3.11's
+# bundled pip 22.3 fails on the torch index's newer sdists, so pip is upgraded first.
+#   git clone --depth 1 https://github.com/facebookresearch/EdgeTAM third_party/EdgeTAM
+#   py -3.11 -m venv .venv_edgetam
+#   .venv_edgetam\Scripts\python -m pip install -U pip
+#   .venv_edgetam\Scripts\python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#   .venv_edgetam\Scripts\python -m pip install -r requirements.txt
+#   .venv_edgetam\Scripts\python -m pip install -r requirements-edgetam.txt
+# The checkpoint ships in the clone (third_party/EdgeTAM/checkpoints/edgetam.pt, 56 MB). timm is pinned
+# as EdgeTAM's setup.py pins it for the RepViT trunk, and that timm imports names huggingface_hub 1.x
+# removed, which surfaces as "Hugging Face hub model specified but package not installed".
+timm==1.0.15
+huggingface_hub<1
+hydra-core>=1.3.2
+iopath>=0.1.10
+pillow
+onnx
+onnxruntime

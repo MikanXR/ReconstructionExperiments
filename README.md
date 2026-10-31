@@ -36,7 +36,7 @@ python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 ```
 
-That venv runs the baseline, fusion, evaluation, and the report. Each model gets its own venv (`.venv_promptda`, `.venv_da3`, `.venv_mapanything`, `.venv_sam2`) built the same way, plus the model's own dependencies. The exact commands that worked, and the pitfalls, are at the top of each `methods/*.py`. `requirements-<method>.txt` files hold the extra packages where a method needs more than `requirements.txt`. Model repos are cloned under `third_party/` and checkpoints land in the HuggingFace cache. Run a method with its own venv's python, since the harness measures peak VRAM in-process:
+That venv runs the baseline, fusion, evaluation, and the report. Each model gets its own venv (`.venv_promptda`, `.venv_da3`, `.venv_mapanything`, `.venv_sam2`, `.venv_edgetam`, `.venv_efficienttam`, `.venv_efficientvit`) built the same way, plus the model's own dependencies. The exact commands that worked, and the pitfalls, are at the top of each `methods/*.py`. `requirements-<method>.txt` files hold the extra packages where a method needs more than `requirements.txt`. Model repos are cloned under `third_party/` and checkpoints land in the HuggingFace cache. Run a method with its own venv's python, since the harness measures peak VRAM in-process:
 
 ```
 .venv_da3\Scripts\python run.py da3

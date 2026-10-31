@@ -9,9 +9,15 @@
 # Checkpoints go to models/sam2 (gitignored), one curl each:
 #   https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_{tiny,small,base_plus,large}.pt
 # onnx and the CPU onnxruntime are for tools/sam2_export_encoder.py and its check against torch. The
-# DirectML runtime conflicts with onnxruntime, so tools/sam2_dml_timing.py runs in a venv of its own:
+# DirectML runtime conflicts with onnxruntime, so tools/sam2_dml_timing.py runs in a venv of its own,
+# and a second one pins the editor's ONNX Runtime (1.20.1, build.md), which is the timing that counts:
 #   python -m venv .venv_sam2_dml
-#   .venv_sam2_dml\Scripts\python -m pip install onnxruntime-directml numpy opencv-python
+#   .venv_sam2_dml\Scripts\python -m pip install onnxruntime-directml numpy opencv-python onnx
+#   py -3.11 -m venv .venv_sam2_dml120
+#   .venv_sam2_dml120\Scripts\python -m pip install -U pip
+#   .venv_sam2_dml120\Scripts\python -m pip install "onnxruntime-directml==1.20.1" numpy opencv-python onnx
+# The lighter segmenters measured beside SAM2 have their own venvs: requirements-edgetam.txt,
+# requirements-efficienttam.txt and requirements-efficientvit.txt.
 sam2==1.1.0
 onnx
 onnxruntime

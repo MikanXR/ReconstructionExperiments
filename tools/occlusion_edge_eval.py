@@ -91,11 +91,17 @@ def region_from_depth(depth: np.ndarray, tau: float, gt: np.ndarray) -> np.ndarr
 
 
 def load_context(folder: Path) -> Context:
+    """The context of a marked folder: video.png, mesh_depth.npy, refined_depth.npy and gt_mask.png."""
     rgb = cv2.cvtColor(cv2.imread(str(folder / "video.png")), cv2.COLOR_BGR2RGB)
     mesh = np.load(folder / "mesh_depth.npy")
     refined = np.load(folder / "refined_depth.npy")
     gt = cv2.imread(str(folder / "gt_mask.png"), cv2.IMREAD_GRAYSCALE) > 0
+    return make_context(folder.name, rgb, mesh, refined, gt)
 
+
+def make_context(name: str, rgb: np.ndarray, mesh: np.ndarray, refined: np.ndarray, gt: np.ndarray) -> Context:
+    """The scoring context of a full frame around the occluder gt marks: the crop, the depth threshold,
+    the mesh prior and the occluding stretches of gt's outline."""
     ys, xs = np.nonzero(gt)
     h, w = gt.shape
     y0, y1 = max(ys.min() - CROP_MARGIN, 0), min(ys.max() + CROP_MARGIN + 1, h)
@@ -135,7 +141,7 @@ def load_context(folder: Path) -> Context:
     occluding = np.zeros_like(gt)
     occluding[ey[occl], ex[occl]] = True
 
-    return Context(folder.name, rgb, mesh, refined, gt, tau, prior, occluding, (x0, y0))
+    return Context(name, rgb, mesh, refined, gt, tau, prior, occluding, (x0, y0))
 
 
 # ---- scoring --------------------------------------------------------------------
